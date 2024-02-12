@@ -4,8 +4,8 @@ Unity SDK Template - Smart Wallets, Session Keys and Storage.
 
 Contains three scenes:
 - `00_Scene_Main`: Introduction, wallet connection, ERC1155 Claiming using session keys (granting signing permissions to the game).
-- `01_Scene_Game`: Placeholder for gameplay, move forward to claim additional ERC20 tokens.
-- `02_Scene_Inventory`: Displays total NFTs and Tokens held, showcases IPFS storage upload to share results.
+- `01_Scene_Game`: Placeholder for gameplay, move forward to claim additional ERC20 tokens. (WASD or arrow keys to move, go forward for next step)
+- `02_Scene_Inventory`: Displays total NFTs and Tokens held, showcases IPFS storage upload to share results. (Press `Play Again` to reconnect without having to sign with MM again using session keys)
 
 Platforms supported: WebGL, Standalone.
 

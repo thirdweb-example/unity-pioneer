@@ -11,7 +11,7 @@ Platforms supported: WebGL, Standalone.
 
 Test in WebGL here: https://thirdweb-example.github.io/pioneer/
 
-_Note: This template showcases connecting to a Smart Wallet using MetaMask, before ultimately granting a session key to a local wallet, therefore behavior in Standalone differs from WebGL, whereby Standalone/Editor builds will show a QR code to scan._
+_Note: This template showcases connecting to a Smart Wallet using MetaMask, before ultimately granting a session key to a local wallet, therefore behavior in Standalone differs from WebGL, whereby Standalone/Editor builds will show a QR code to scan. This example also shows how to override MetamaskUI.cs and the WalletProvider_Metamask default prefab._
 
  ## Setup Instructions
  1. Clone this repository.

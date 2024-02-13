@@ -21,3 +21,5 @@ _Note: This template showcases connecting to a Smart Wallet using MetaMask, befo
  5. If testing in WebGL, set allowlisted domains to `*` or to your localhost url.
  6. Find your `ThirdwebManager` in `00_Scene_Main` and set the client id there.
  7. Press Play!
+
+To build the game, make sure you follow our build instructions [here](https://github.com/thirdweb-dev/unity-sdk#build).

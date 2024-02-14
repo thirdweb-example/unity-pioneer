@@ -2,6 +2,8 @@
 
 Unity SDK Template - Smart Wallets, Session Keys and Storage.
 
+![pioneer](https://github.com/thirdweb-example/pioneer/assets/43042585/c224fd85-37e6-41a7-b16f-c5483a0b39a5)
+
 Contains three scenes:
 - `00_Scene_Main`: Introduction, wallet connection, ERC1155 Claiming using session keys (granting signing permissions to the game).
 - `01_Scene_Game`: Placeholder for gameplay, move forward to claim additional ERC20 tokens. (WASD or arrow keys to move, go forward for next step)

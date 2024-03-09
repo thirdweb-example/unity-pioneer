@@ -10,8 +10,8 @@ using Nethereum.ABI.EIP712;
 using Nethereum.Signer.EIP712;
 using Newtonsoft.Json.Linq;
 using Nethereum.Hex.HexTypes;
-using Newtonsoft.Json;
 using System.Linq;
+using Newtonsoft.Json;
 
 namespace Thirdweb
 {
@@ -30,13 +30,15 @@ namespace Thirdweb
         /// <returns>A task representing the connection result.</returns>
         public async Task<string> Connect(WalletConnection walletConnection)
         {
+            string address = null;
+
             if (Utils.IsWebGLBuild())
             {
-                return await Bridge.Connect(walletConnection);
+                address = await Bridge.Connect(walletConnection);
             }
             else
             {
-                string address = await ThirdwebManager.Instance.SDK.session.Connect(walletConnection);
+                address = await ThirdwebManager.Instance.SDK.session.Connect(walletConnection);
                 Utils.TrackWalletAnalytics(
                     ThirdwebManager.Instance.SDK.session.Options.clientId,
                     "connectWallet",
@@ -46,6 +48,17 @@ namespace Thirdweb
                 );
                 return address;
             }
+
+            try
+            {
+                await SwitchNetwork(walletConnection.chainId);
+            }
+            catch
+            {
+                // no-op
+            }
+
+            return address;
         }
 
         /// <summary>
@@ -309,7 +322,18 @@ namespace Thirdweb
         {
             if (Utils.IsWebGLBuild())
             {
-                return await Bridge.GetSigner();
+                try
+                {
+                    var signer = await Bridge.GetSigner();
+                    if (string.IsNullOrEmpty(signer))
+                        return await GetAddress();
+                    else
+                        return signer;
+                }
+                catch
+                {
+                    return await GetAddress();
+                }
             }
             else
             {
@@ -424,13 +448,48 @@ namespace Thirdweb
             }
             else
             {
-                if (ThirdwebManager.Instance.SDK.session.ActiveWallet.GetProvider() == WalletProvider.SmartWallet && ThirdwebManager.Instance.SDK.session.Options.smartWalletConfig.Value.deployOnSign)
+                if (ThirdwebManager.Instance.SDK.session.ActiveWallet.GetProvider() == WalletProvider.SmartWallet)
                 {
                     var sw = ThirdwebManager.Instance.SDK.session.ActiveWallet as Wallets.ThirdwebSmartWallet;
                     if (!sw.SmartWallet.IsDeployed && !sw.SmartWallet.IsDeploying)
                     {
                         ThirdwebDebug.Log("SmartWallet not deployed, deploying before signing...");
                         await sw.SmartWallet.ForceDeploy();
+                    }
+                    if (sw.SmartWallet.IsDeployed)
+                    {
+                        byte[] originalMsgHash = System.Text.Encoding.UTF8.GetBytes(message).HashPrefixedMessage();
+                        string swAddress = await GetAddress();
+                        bool factorySupports712;
+                        string signature = null;
+                        try
+                        {
+                            // if this fails it's a pre 712 factory
+                            await TransactionManager.ThirdwebRead<Contracts.Account.ContractDefinition.GetMessageHashFunction, Contracts.Account.ContractDefinition.GetMessageHashOutputDTO>(
+                                swAddress,
+                                new Contracts.Account.ContractDefinition.GetMessageHashFunction() { Hash = originalMsgHash }
+                            );
+                            factorySupports712 = true;
+                        }
+                        catch
+                        {
+                            factorySupports712 = false;
+                        }
+
+                        if (factorySupports712)
+                            signature = await EIP712.GenerateSignature_SmartAccount_AccountMessage("Account", "1", await GetChainId(), swAddress, originalMsgHash);
+                        else
+                            signature = await ThirdwebManager.Instance.SDK.session.Request<string>("personal_sign", message, await GetSignerAddress());
+
+                        bool isValid = await RecoverAddress(message, signature) == swAddress;
+                        if (isValid)
+                            return signature;
+                        else
+                            throw new Exception("Unable to verify signature on smart account, please make sure the smart account is deployed and the signature is valid.");
+                    }
+                    else
+                    {
+                        throw new Exception("Smart account could not be deployed, unable to sign message.");
                     }
                 }
 
@@ -452,51 +511,90 @@ namespace Thirdweb
             if (!await IsConnected())
                 throw new Exception("No account connected!");
 
-            if (ThirdwebManager.Instance.SDK.session.ActiveWallet.GetProvider() == WalletProvider.SmartWallet && ThirdwebManager.Instance.SDK.session.Options.smartWalletConfig.Value.deployOnSign)
+            if (Utils.IsWebGLBuild())
             {
-                var sw = ThirdwebManager.Instance.SDK.session.ActiveWallet as Wallets.ThirdwebSmartWallet;
-                if (!sw.SmartWallet.IsDeployed && !sw.SmartWallet.IsDeploying)
+                var domainType = typedData.Domain.GetType();
+                var domain = new
                 {
-                    ThirdwebDebug.Log("SmartWallet not deployed, deploying before signing...");
-                    await sw.SmartWallet.ForceDeploy();
-                }
-            }
+                    name = domainType.GetProperty("Name").GetValue(typedData.Domain).ToString(),
+                    version = domainType.GetProperty("Version").GetValue(typedData.Domain).ToString(),
+                    chainId = domainType.GetProperty("ChainId").GetValue(typedData.Domain).ToString(),
+                    verifyingContract = domainType.GetProperty("VerifyingContract").GetValue(typedData.Domain).ToString()
+                };
 
-            if (ThirdwebManager.Instance.SDK.session.ActiveWallet.GetLocalAccount() != null)
-            {
-                var signer = new Eip712TypedDataSigner();
-                var key = new EthECKey(ThirdwebManager.Instance.SDK.session.ActiveWallet.GetLocalAccount().PrivateKey);
-                return signer.SignTypedDataV4(data, typedData, key);
+                var types = new Dictionary<string, object>();
+                foreach (var type in typedData.Types)
+                {
+                    if (type.Key.Contains("EIP712Domain"))
+                        continue;
+
+                    types.Add(type.Key, type.Value);
+                }
+
+                var message = new Dictionary<string, object>();
+                foreach (var member in data.GetType().GetProperties())
+                {
+                    string n = char.ToLower(member.Name[0]) + member.Name.Substring(1);
+                    object v = member.GetValue(data);
+                    // hexify bytes to avoid base64 json serialization, mostly useful for bytes32 uid
+                    if (member.PropertyType == typeof(byte[]))
+                        v = Utils.ToBytes32HexString((byte[])v);
+                    message.Add(n, v);
+                }
+                var result = await Bridge.InvokeRoute<JToken>(getRoute("signTypedData"), Utils.ToJsonStringArray(domain, types, message));
+                return result["signature"].Value<string>();
             }
             else
             {
-                var json = typedData.ToJson(data);
-                var jsonObject = JObject.Parse(json);
-
-                var uidToken = jsonObject.SelectToken("$.message.uid");
-                if (uidToken != null)
+                if (ThirdwebManager.Instance.SDK.session.ActiveWallet.GetLocalAccount() != null)
                 {
-                    var uidBase64 = uidToken.Value<string>();
-                    var uidBytes = Convert.FromBase64String(uidBase64);
-                    var uidHex = uidBytes.ByteArrayToHexString();
-                    uidToken.Replace(uidHex);
+                    var signer = new Eip712TypedDataSigner();
+                    var key = new EthECKey(ThirdwebManager.Instance.SDK.session.ActiveWallet.GetLocalAccount().PrivateKey);
+                    return signer.SignTypedDataV4(data, typedData, key);
                 }
-
-                var messageObject = jsonObject.GetValue("message") as JObject;
-                foreach (var property in messageObject.Properties())
+                else
                 {
-                    if (property.Value.Type == JTokenType.Array)
-                    {
-                        continue;
-                    }
-                    else
-                    {
-                        property.Value = property.Value.ToString();
-                    }
-                }
+                    var json = typedData.ToJson(data);
+                    var jsonObject = JObject.Parse(json);
 
-                string safeJson = jsonObject.ToString();
-                return await ThirdwebManager.Instance.SDK.session.Request<string>("eth_signTypedData_v4", await GetSignerAddress(), safeJson);
+                    var uidToken = jsonObject.SelectToken("$.message.uid");
+                    if (uidToken != null)
+                    {
+                        var uidBase64 = uidToken.Value<string>();
+                        var uidBytes = Convert.FromBase64String(uidBase64);
+                        var uidHex = uidBytes.ByteArrayToHexString();
+                        uidToken.Replace(uidHex);
+                    }
+
+                    if (ThirdwebManager.Instance.SDK.session.ActiveWallet.GetProvider() == WalletProvider.SmartWallet)
+                    {
+                        // Smart accounts
+                        var hashToken = jsonObject.SelectToken("$.message.message");
+                        if (hashToken != null)
+                        {
+                            var hashBase64 = hashToken.Value<string>();
+                            var hashBytes = Convert.FromBase64String(hashBase64);
+                            var hashHex = hashBytes.ByteArrayToHexString();
+                            hashToken.Replace(hashHex);
+                        }
+                    }
+
+                    var messageObject = jsonObject.GetValue("message") as JObject;
+                    foreach (var property in messageObject.Properties())
+                    {
+                        if (property.Value.Type == JTokenType.Array)
+                        {
+                            continue;
+                        }
+                        else
+                        {
+                            property.Value = property.Value.ToString();
+                        }
+                    }
+
+                    string safeJson = jsonObject.ToString();
+                    return await ThirdwebManager.Instance.SDK.session.Request<string>("eth_signTypedData_v4", await GetSignerAddress(), safeJson);
+                }
             }
         }
 
@@ -518,7 +616,7 @@ namespace Thirdweb
                 if (ThirdwebManager.Instance.SDK.session.ActiveWallet.GetProvider() == WalletProvider.SmartWallet)
                 {
                     var sw = ThirdwebManager.Instance.SDK.session.ActiveWallet as Wallets.ThirdwebSmartWallet;
-                    bool isSigValid = await sw.SmartWallet.VerifySignature(signer.HashPrefixedMessage(System.Text.Encoding.UTF8.GetBytes(message)), signature.HexStringToByteArray());
+                    bool isSigValid = await sw.SmartWallet.VerifySignature(message.HashPrefixedMessage().HexStringToByteArray(), signature.HexStringToByteArray());
                     if (isSigValid)
                     {
                         return await GetAddress();
@@ -767,10 +865,10 @@ namespace Thirdweb
                     transactionRequest.from,
                     new HexBigInteger(BigInteger.Parse(transactionRequest.gasLimit)),
                     new HexBigInteger(BigInteger.Parse(transactionRequest.gasPrice)),
-                    new HexBigInteger(transactionRequest.value)
+                    new HexBigInteger(BigInteger.Parse(transactionRequest.value))
                 );
-                var receipt = await ThirdwebManager.Instance.SDK.session.Web3.Eth.TransactionManager.SendTransactionAndWaitForReceiptAsync(input);
-                return receipt.ToTransactionResult();
+                var hash = await ThirdwebManager.Instance.SDK.session.Web3.Eth.TransactionManager.SendTransactionAsync(input);
+                return await Transaction.WaitForTransactionResult(hash);
             }
         }
 

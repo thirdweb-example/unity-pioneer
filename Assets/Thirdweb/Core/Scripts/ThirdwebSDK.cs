@@ -113,9 +113,14 @@ namespace Thirdweb
             public bool gasless;
 
             /// <summary>
-            /// Indicates whether to deploy the smart wallet upon signing any type of message.
+            /// The address of your ERC20 paymaster contract if used.
             /// </summary>
-            public bool deployOnSign;
+            public string erc20PaymasterAddress;
+
+            /// <summary>
+            /// The address of your ERC20 token if using ERC20 paymaster.
+            /// </summary>
+            public string erc20TokenAddress;
 
             /// <summary>
             /// The URL of the bundler service.
@@ -238,7 +243,7 @@ namespace Thirdweb
 
         public ThirdwebSession session;
 
-        internal const string version = "4.6.2";
+        internal const string version = "4.7.7";
 
         /// <summary>
         /// Create an instance of the Thirdweb SDK.

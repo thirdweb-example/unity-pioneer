@@ -14,6 +14,7 @@ using Newtonsoft.Json.Linq;
 using System.Globalization;
 using System.Linq;
 using System.Net.Http;
+using System.Collections;
 
 namespace Thirdweb
 {
@@ -32,14 +33,37 @@ namespace Thirdweb
                 {
                     continue;
                 }
+                // if array or list, check if bytes and convert to hex
+                if (args[i].GetType().IsArray || args[i] is IList)
+                {
+                    var enumerable = args[i] as IEnumerable;
+                    var enumerableArgs = new List<object>();
+                    foreach (var item in enumerable)
+                    {
+                        if (item is byte[])
+                        {
+                            enumerableArgs.Add(ByteArrayToHexString(item as byte[]));
+                        }
+                        else
+                        {
+                            enumerableArgs.Add(item);
+                        }
+                    }
+                    stringArgs.Add(ToJson(enumerableArgs));
+                }
+                // if bytes, make hex
+                else if (args[i] is byte[])
+                {
+                    stringArgs.Add(ByteArrayToHexString(args[i] as byte[]));
+                }
                 // if value type, convert to string otherwise serialize to json
-                if (args[i].GetType().IsPrimitive || args[i] is string)
+                else if (args[i].GetType().IsPrimitive || args[i] is string)
                 {
                     stringArgs.Add(args[i].ToString());
                 }
                 else
                 {
-                    stringArgs.Add(Utils.ToJson(args[i]));
+                    stringArgs.Add(ToJson(args[i]));
                 }
             }
             return stringArgs.ToArray();
@@ -524,7 +548,7 @@ namespace Thirdweb
                 chainId == 1 // mainnet
                 || chainId == 11155111 // sepolia
                 || chainId == 42161 // arbitrum
-                || chainId == 421613 // arbitrum goerli
+                || chainId == 421614 // arbitrum sepolia
                 || chainId == 534352 // scroll
                 || chainId == 534351 // scroll sepolia
                 || chainId == 5000 // mantle
@@ -534,6 +558,8 @@ namespace Thirdweb
                 || chainId == 44787 // celo alfajores
                 || chainId == 43114 // avalanche
                 || chainId == 43113 // avalanche fuji
+                || chainId == 8453 // base
+                || chainId == 84532 // base sepolia
             )
             {
                 gasPrice = BigInteger.Multiply(gasPrice, 10) / 9;
@@ -636,6 +662,30 @@ namespace Thirdweb
             {
                 ThirdwebDebug.LogWarning($"Failed to send wallet analytics: {e}");
             }
+        }
+
+        public static byte[] HashPrefixedMessage(this byte[] messageBytes)
+        {
+            var signer = new EthereumMessageSigner();
+            return signer.HashPrefixedMessage(messageBytes);
+        }
+
+        public static string HashPrefixedMessage(this string message)
+        {
+            var signer = new EthereumMessageSigner();
+            return signer.HashPrefixedMessage(System.Text.Encoding.UTF8.GetBytes(message)).ByteArrayToHexString();
+        }
+
+        public static byte[] HashMessage(this byte[] messageBytes)
+        {
+            var sha3 = new Nethereum.Util.Sha3Keccack();
+            return sha3.CalculateHash(messageBytes);
+        }
+
+        public static string HashMessage(this string message)
+        {
+            var sha3 = new Nethereum.Util.Sha3Keccack();
+            return sha3.CalculateHash(message);
         }
     }
 }

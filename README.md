@@ -1,8 +1,13 @@
-# pioneer
+# unity-pioneer
 
-Unity SDK Template - Smart Wallets, Session Keys and Storage.
+Unity SDK Template showcasing how to grant signing access to an app for games using external wallets. This flow helps avoid their users needing to sign every transaction post onboarding.
 
-![pioneer](https://github.com/thirdweb-example/pioneer/assets/43042585/c224fd85-37e6-41a7-b16f-c5483a0b39a5)
+## Features
+- Account Abstraction
+- Session Keys
+- Storage
+
+## Scenes
 
 Contains three scenes:
 - `00_Scene_Main`: Introduction, wallet connection, ERC1155 Claiming using session keys (granting signing permissions to the game).
@@ -10,8 +15,6 @@ Contains three scenes:
 - `02_Scene_Inventory`: Displays total NFTs and Tokens held, showcases IPFS storage upload to share results. (Press `Play Again` to reconnect without having to sign with MM again using session keys)
 
 Platforms supported: WebGL, Standalone.
-
-Test in WebGL here: https://thirdweb-example.github.io/unity-pioneer/
 
 _Note: This template showcases connecting to a Smart Wallet using MetaMask, before ultimately granting a session key to a local wallet, therefore behavior in Standalone differs from WebGL, whereby Standalone/Editor builds will show a QR code to scan. This example also shows how to override MetamaskUI.cs and the WalletProvider_Metamask default prefab._
 
@@ -24,4 +27,21 @@ _Note: This template showcases connecting to a Smart Wallet using MetaMask, befo
  6. Find your `ThirdwebManager` in `00_Scene_Main` and set the client id there.
  7. Press Play!
 
-To build the game, make sure you follow our build instructions [here](https://github.com/thirdweb-dev/unity-sdk#build).
+## Screenshots
+
+![pioneer](https://github.com/thirdweb-example/pioneer/assets/43042585/c224fd85-37e6-41a7-b16f-c5483a0b39a5)
+
+## Documentation
+
+- To build the game, follow the [build instructions](https://github.com/thirdweb-dev/unity-sdk#build)
+- Learn more from the [Unity SDK Documentation](https://portal.thirdweb.com/unity)
+
+
+## Contributing
+
+Contributions are always welcome! See our [open source page](https://thirdweb.com/open-source) for more information. 
+
+
+## Support 
+
+For help or feedback, please [visit our support site](https://thirdweb.com/support)

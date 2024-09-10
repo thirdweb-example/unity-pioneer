@@ -2,9 +2,9 @@ using System.Collections;
 using Thirdweb;
 using UnityEngine;
 using UnityEngine.SceneManagement;
-using Thirdweb.Redcode.Awaiting;
 using System.Collections.Generic;
 using System.Threading.Tasks;
+using Thirdweb.Unity;
 
 [RequireComponent(typeof(CharacterController))]
 // Basic Character Movement
@@ -90,10 +90,18 @@ public class CharacterManager : MonoBehaviour
     private async void ClaimAndLoad()
     {
         LightenVoid();
-        var mmAddress = PlayerPrefs.GetString("PERSONAL_WALLET_ADDRESS");
-        var contract = ThirdwebManager.Instance.SDK.GetContract(GameContracts.TOKEN_CONTRACT);
+        var contract = await ThirdwebManager.Instance.GetContract(
+            BlockchainManager.TokenContract,
+            BlockchainManager.ChainId
+        );
         Debug.Log("Claiming");
-        var claimTokensRes = await contract.ERC20.ClaimTo(mmAddress, "100");
+        var smartWallet = BlockchainManager.SmartWallet;
+        var externalWalletAddress = await (await smartWallet.GetPersonalWallet()).GetAddress();
+        var claimTokensRes = await contract.DropERC20_Claim(
+            smartWallet,
+            externalWalletAddress,
+            "100"
+        );
         Debug.Log(claimTokensRes);
         StopAllCoroutines();
         SceneManager.LoadScene("02_Scene_Inventory");

@@ -3,11 +3,11 @@ using Thirdweb;
 using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
-using Thirdweb.Redcode.Awaiting;
 using UnityEngine.SceneManagement;
 using System.Threading.Tasks;
 using System.Collections.Generic;
 using UnityEngine.Assertions;
+using Thirdweb.Unity;
 
 public class TutorialManager : MonoBehaviour
 {
@@ -51,43 +51,35 @@ public class TutorialManager : MonoBehaviour
         ConnectButton.interactable = false;
         _connectButtonText.text = "[ Connecting ]";
 
-        var isConnected = await ThirdwebManager.Instance.SDK.wallet.IsConnected();
-        if (isConnected)
-            await ThirdwebManager.Instance.SDK.wallet.Disconnect();
-
-        // Store local wallet signer address for later use
-        var localWalletConnection = new WalletConnection(
-            provider: WalletProvider.LocalWallet,
-            chainId: 421614
+        // Create local wallet
+        BlockchainManager.LocalWallet ??= await PrivateKeyWallet.Generate(
+            client: ThirdwebManager.Instance.Client
         );
-        var localWalletAddress = await ThirdwebManager.Instance.SDK.wallet.Connect(
-            localWalletConnection
-        );
-        PlayerPrefs.SetString("LOCAL_WALLET_ADDRESS", localWalletAddress);
-
-        await ThirdwebManager.Instance.SDK.wallet.Disconnect(); // sanity
 
         // Connect to canonical smart wallet using MetaMask
-        var walletConnection = new WalletConnection(
-            provider: WalletProvider.SmartWallet,
-            chainId: 421614,
-            personalWallet: WalletProvider.Metamask
+        var externalSmartWalletOptions = new WalletOptions(
+            provider: Application.platform == RuntimePlatform.WebGLPlayer
+                ? WalletProvider.MetaMaskWallet
+                : WalletProvider.WalletConnectWallet,
+            chainId: BlockchainManager.ChainId,
+            smartWalletOptions: new SmartWalletOptions(sponsorGas: true)
         );
-        var smartWalletAddress = await ThirdwebManager.Instance.SDK.wallet.Connect(
-            walletConnection
-        );
-        var metamaskAddress = await ThirdwebManager.Instance.SDK.wallet.GetSignerAddress();
+        BlockchainManager.SmartWallet =
+            await ThirdwebManager.Instance.ConnectWallet(externalSmartWalletOptions) as SmartWallet;
 
-        // Store MetaMask admin and Smart Wallet addresses for later use
-        PlayerPrefs.SetString("SMART_WALLET_ADDRESS", smartWalletAddress);
-        PlayerPrefs.SetString("PERSONAL_WALLET_ADDRESS", metamaskAddress);
+        var externalWalletAddress = await (
+            await BlockchainManager.SmartWallet.GetPersonalWallet()
+        ).GetAddress();
+
+        var maybeEns = await Utils.GetENSFromAddress(
+            ThirdwebManager.Instance.Client,
+            externalWalletAddress
+        );
 
         // Display MetaMask address since that's what we'll use as final asset destination in this example
-        PostConnectText.text = $"Welcome, {metamaskAddress}";
-        await ConnectUsingLocalWalletAndGrantSessionKeyIfNeeded(
-            smartWalletAddress,
-            localWalletAddress
-        );
+        PostConnectText.text = $"Welcome, {maybeEns}";
+
+        await ConnectUsingLocalWalletAndGrantSessionKeyIfNeeded();
 
         ConnectButton.onClick.RemoveListener(Login);
 
@@ -97,20 +89,22 @@ public class TutorialManager : MonoBehaviour
         _connectButtonText.text = "[ Claim Reward ]";
     }
 
-    private async Task ConnectUsingLocalWalletAndGrantSessionKeyIfNeeded(
-        string smartWalletAddress,
-        string localWalletAddress
-    )
+    private async Task ConnectUsingLocalWalletAndGrantSessionKeyIfNeeded()
     {
+        var localWalletAddress = await BlockchainManager.LocalWallet.GetAddress();
+        Debug.Log($"Local wallet address: {localWalletAddress}");
+
         // Check if local wallet is an active signer already
         bool needsNewSessionKey = true;
         try
         {
-            var allActiveSigners = await ThirdwebManager.Instance.SDK.wallet.GetAllActiveSigners();
+            var allActiveSigners = await BlockchainManager.SmartWallet.GetAllActiveSigners();
             foreach (var signer in allActiveSigners)
             {
-                if (signer.signer.ToChecksumAddress() == localWalletAddress.ToChecksumAddress())
+                Debug.Log($"Active signer: {signer.Signer}");
+                if (signer.Signer.ToChecksumAddress() == localWalletAddress.ToChecksumAddress())
                 {
+                    Debug.Log("Local wallet is an active signer, no need to grant access.");
                     needsNewSessionKey = false;
                     break;
                 }
@@ -128,63 +122,65 @@ public class TutorialManager : MonoBehaviour
             // Create session key granting restricted smart wallet access to the local wallet for 1 day
             var contractsAllowedForInteraction = new List<string>()
             {
-                GameContracts.NFT_CONTRACT,
-                GameContracts.TOKEN_CONTRACT
+                BlockchainManager.NftContract,
+                BlockchainManager.TokenContract
             }; // contracts the local wallet is allowed to interact with
 
             var permissionEndTimestamp = Utils.GetUnixTimeStampNow() + 86400; // 1 day from now
-            var result = await ThirdwebManager.Instance.SDK.wallet.CreateSessionKey(
+            _ = await BlockchainManager.SmartWallet.CreateSessionKey(
                 signerAddress: localWalletAddress,
                 approvedTargets: contractsAllowedForInteraction,
                 nativeTokenLimitPerTransactionInWei: "0",
                 permissionStartTimestamp: "0",
                 permissionEndTimestamp: permissionEndTimestamp.ToString(),
                 reqValidityStartTimestamp: "0",
-                reqValidityEndTimestamp: Utils.GetUnixTimeStampIn10Years().ToString()
+                reqValidityEndTimestamp: (Utils.GetUnixTimeStampNow() + 3600).ToString() // 1 hour from now
             );
         }
 
         _connectButtonText.text = "[ Connecting ]";
 
-        await ThirdwebManager.Instance.SDK.wallet.Disconnect(); // sanity
-
         // Connect to the app using the local wallet for a signless experience
-        var finalWalletConnection = new WalletConnection(
-            provider: WalletProvider.SmartWallet,
-            chainId: 421614,
-            personalWallet: WalletProvider.LocalWallet,
-            smartWalletAccountOverride: smartWalletAddress
+        BlockchainManager.SmartWallet = await SmartWallet.Create(
+            personalWallet: BlockchainManager.LocalWallet,
+            chainId: BlockchainManager.ChainId,
+            gasless: true,
+            // Smart wallet we want to reconnect to with a different signer
+            accountAddressOverride: await BlockchainManager.SmartWallet.GetAddress()
         );
-        var swAddy = await ThirdwebManager.Instance.SDK.wallet.Connect(finalWalletConnection);
-        Assert.IsTrue(smartWalletAddress == swAddy);
     }
 
     private async void Claim()
     {
-        var mmAddress = PlayerPrefs.GetString("PERSONAL_WALLET_ADDRESS");
-
         ConnectButton.interactable = false;
         _connectButtonText.text = "[ Claiming ]";
 
+        var smartWallet = BlockchainManager.SmartWallet;
+        var personalWallet = await smartWallet.GetPersonalWallet();
+
         var rand = Random.Range(0, 5);
-        var contract = ThirdwebManager.Instance.SDK.GetContract(GameContracts.NFT_CONTRACT);
-        var txRes = await contract.ERC1155.ClaimTo(mmAddress, rand.ToString(), 1);
+        var contract = await ThirdwebManager.Instance.GetContract(
+            BlockchainManager.NftContract,
+            BlockchainManager.ChainId
+        );
+        var txRes = await contract.DropERC1155_Claim(
+            wallet: smartWallet,
+            receiverAddress: await personalWallet.GetAddress(),
+            tokenId: rand,
+            quantity: 1
+        );
 
         ConnectButton.onClick.RemoveListener(Claim);
         _connectButtonText.text = "[ Claimed ]";
 
-        var nftInfo = await contract.ERC1155.Get(rand.ToString());
-        NFTImage.sprite = await ThirdwebManager.Instance.SDK.storage.DownloadImage(
-            nftInfo.metadata.image
-        );
+        var nft = await contract.ERC1155_GetNFT(rand);
+        NFTImage.sprite = await nft.GetNFTSprite(client: ThirdwebManager.Instance.Client);
         NFTImage.color = Color.white;
         NFTButton.onClick.AddListener(() =>
         {
-            Application.OpenURL($"https://sepolia.arbiscan.io/tx/{txRes.receipt.transactionHash}");
+            Application.OpenURL($"https://sepolia.arbiscan.io/tx/{txRes.TransactionHash}");
         });
         NFTButton.interactable = true;
-
-        await new WaitForSeconds(3);
 
         _connectButtonText.text = "[ Explore ]";
         ConnectButton.onClick.AddListener(() =>

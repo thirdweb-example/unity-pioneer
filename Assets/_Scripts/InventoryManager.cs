@@ -4,9 +4,11 @@ using System.IO;
 using Thirdweb;
 using TMPro;
 using UnityEngine;
-using Thirdweb.Redcode.Awaiting;
 using UnityEngine.UI;
 using UnityEngine.SceneManagement;
+using Thirdweb.Unity;
+using System.Threading.Tasks;
+using System.Numerics;
 
 public class InventoryManager : MonoBehaviour
 {
@@ -16,37 +18,47 @@ public class InventoryManager : MonoBehaviour
     public TMP_Text TotalTokensText;
     public Button UploadButton;
 
-    private Contract _nftContract;
-    private Contract _tokenContract;
+    private ThirdwebContract _nftContract;
+    private ThirdwebContract _tokenContract;
 
     private async void Awake()
     {
         var uploadButtonText = UploadButton.GetComponentInChildren<TMP_Text>();
         uploadButtonText.alpha = 0;
 
-        _nftContract = ThirdwebManager.Instance.SDK.GetContract(GameContracts.NFT_CONTRACT);
-        _tokenContract = ThirdwebManager.Instance.SDK.GetContract(GameContracts.TOKEN_CONTRACT);
-
-        var addy = PlayerPrefs.GetString("PERSONAL_WALLET_ADDRESS");
+        _nftContract = await ThirdwebManager.Instance.GetContract(
+            BlockchainManager.NftContract,
+            BlockchainManager.ChainId
+        );
+        _tokenContract = await ThirdwebManager.Instance.GetContract(
+            BlockchainManager.TokenContract,
+            BlockchainManager.ChainId
+        );
 
         var nftsEarnedText = "NFTs earned...1";
-        await StartCoroutine(SetText(NFTsEarnedText, nftsEarnedText));
+        await SetText(NFTsEarnedText, nftsEarnedText);
         var tokensEarnedText = "Tokens earned...100";
-        await StartCoroutine(SetText(TokensEarnedText, tokensEarnedText));
+        await SetText(TokensEarnedText, tokensEarnedText);
 
-        var nftsOwned = await _nftContract.ERC1155.GetOwned(addy);
-        int nftBalance = 0;
+        var externalWalletAddress = await (
+            await BlockchainManager.SmartWallet.GetPersonalWallet()
+        ).GetAddress();
+
+        var nftsOwned = await _nftContract.ERC1155_GetOwnedNFTs(externalWalletAddress);
+        BigInteger nftBalance = 0;
         foreach (NFT nft in nftsOwned)
         {
-            nftBalance += nft.quantityOwned;
+            nftBalance += nft.QuantityOwned ?? 0;
         }
 
-        var tokenBalance = (await _tokenContract.ERC20.BalanceOf(addy)).value.ToEth(0, false);
+        var tokenBalance = (await _tokenContract.ERC20_BalanceOf(externalWalletAddress))
+            .ToString()
+            .ToEth(0, false);
 
         var totalNftsText = nftBalance + " Total NFTs";
-        await StartCoroutine(SetText(TotalNFTsText, totalNftsText));
+        await SetText(TotalNFTsText, totalNftsText);
         var totalTokensText = tokenBalance + " Total Tokens";
-        await StartCoroutine(SetText(TotalTokensText, totalTokensText));
+        await SetText(TotalTokensText, totalTokensText);
 
         UploadButton.onClick.AddListener(OnUpload);
         UploadButton.interactable = true;
@@ -64,16 +76,16 @@ public class InventoryManager : MonoBehaviour
             File.Delete(fullPath);
         ScreenCapture.CaptureScreenshot(fullPath);
 
-        await new WaitForSeconds(3f);
+        await Task.Delay(100);
 
-        var response = await ThirdwebManager.Instance.SDK.storage.UploadFromPath(fullPath);
+        var response = await ThirdwebStorage.Upload(ThirdwebManager.Instance.Client, fullPath);
 
         UploadButton.interactable = true;
         UploadButton.GetComponentInChildren<TMP_Text>().text = "[ View ]";
         UploadButton.onClick.AddListener(() =>
         {
             Application.OpenURL(
-                $"https://{ThirdwebManager.Instance.clientId}.ipfscdn.io/ipfs/{response.IpfsHash}"
+                $"https://{ThirdwebManager.Instance.Client.ClientId}.ipfscdn.io/ipfs/{response.IpfsHash}"
             );
             UploadButton.GetComponentInChildren<TMP_Text>().text = "[ Play Again ]";
             UploadButton.onClick.RemoveAllListeners();
@@ -81,7 +93,7 @@ public class InventoryManager : MonoBehaviour
         });
     }
 
-    IEnumerator SetText(TMP_Text text, string value)
+    private async Task SetText(TMP_Text text, string value)
     {
         text.alpha = 0f;
         text.text = value;
@@ -89,13 +101,13 @@ public class InventoryManager : MonoBehaviour
         while (text.alpha < 1)
         {
             text.alpha += Time.deltaTime / 2;
-            yield return null;
+            await Task.Yield();
         }
     }
 
-    private async void Restart()
+    private void Restart()
     {
-        await ThirdwebManager.Instance.SDK.wallet.Disconnect(); // sanity
+        BlockchainManager.SmartWallet = null;
         SceneManager.LoadScene("00_Scene_Main");
     }
 }
